@@ -53,7 +53,7 @@ const EcoFacturPage = () => {
     // Modules modal state
     const [isModulesModalOpen, setIsModulesModalOpen] = useState(false);
     const [modulesCompany, setModulesCompany] = useState<Company | null>(null);
-    const [modulesData, setModulesData] = useState<ModulosResponse | null>(null);
+    const [, setModulesData] = useState<ModulosResponse | null>(null);
     const [modulesLoading, setModulesLoading] = useState(false);
     const [modulesError, setModulesError] = useState<string | null>(null);
     const [localModules, setLocalModules] = useState<Record<string, Modulo>>({});
@@ -379,7 +379,7 @@ const EcoFacturPage = () => {
     };
 
     // Toggle Switch Component
-    const ToggleSwitch = ({ enabled, onChange, label }: { enabled: boolean; onChange: () => void; label: string }) => (
+    const ToggleSwitch = ({ enabled, onChange, label: _label }: { enabled: boolean; onChange: () => void; label: string }) => (
         <div className="flex items-center gap-3">
             <button
                 type="button"
