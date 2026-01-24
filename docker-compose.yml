@@ -1,0 +1,47 @@
+# ==============================================
+# Hennesy Frontend - Docker Compose (Servidor Frontend)
+# ==============================================
+# Este archivo está pensado para deploy independiente
+# en un servidor dedicado solo al frontend.
+#
+# Uso:
+#   docker compose up -d --build
+#   docker compose logs -f frontend
+#   docker compose down
+# ==============================================
+
+services:
+  # ==============================================
+  # React Frontend (Vite + Nginx)
+  # ==============================================
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: hennesy-frontend
+    restart: unless-stopped
+    environment:
+      # Runtime env - API URL del backend (servidor separado)
+      # Cambiar a tu dominio de producción
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-https://api.tudominio.com}
+    ports:
+      # Puerto expuesto para Cloudflare Tunnel
+      - "${FRONTEND_PORT:-8080}:80"
+    healthcheck:
+      test: [ "CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+# ==============================================
+# Notas de Producción
+# ==============================================
+# 1. VITE_API_BASE_URL debe apuntar al dominio público del backend
+#    Ejemplo: https://api.hennesy.com
+#
+# 2. Cloudflare Tunnel debe configurarse para exponer puerto 8080
+#    en el dominio del frontend (ej: app.hennesy.com -> localhost:8080)
+#
+# 3. El frontend es stateless, puede escalarse horizontalmente
+# ==============================================
