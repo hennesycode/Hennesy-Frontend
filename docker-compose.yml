@@ -14,18 +14,12 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     environment:
-      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://backend:5050}
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-https://api.tudominio.com}
     ports:
       - "${FRONTEND_PORT:-5051}:80"
-    networks:
-      - hennesy-network
     healthcheck:
       test: [ "CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/health" ]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 10s
-
-networks:
-  hennesy-network:
-    external: true
