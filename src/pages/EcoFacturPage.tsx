@@ -280,13 +280,14 @@ const EcoFacturPage = () => {
     };
 
     // Helper function to get nested value
-    const getNestedValue = (obj: any, path: string): any => {
-        return path.split('.').reduce((current, key) => current?.[key], obj);
+    const getNestedValue = (obj: any, path: string | string[]): any => {
+        const keys = Array.isArray(path) ? path : path.split('.');
+        return keys.reduce((current, key) => current?.[key], obj);
     };
 
     // Helper function to set nested value
-    const setNestedValue = (obj: any, path: string, value: any): any => {
-        const keys = path.split('.');
+    const setNestedValue = (obj: any, path: string | string[], value: any): any => {
+        const keys = Array.isArray(path) ? path : path.split('.');
         const lastKey = keys.pop()!;
         const target = keys.reduce((current, key) => {
             if (!current[key]) current[key] = {};
@@ -323,17 +324,26 @@ const EcoFacturPage = () => {
         try {
             // Build changes array by comparing original and modified data
             const changes: Array<{
-                path: string;
+                path: string[];
                 value: any;
             }> = [];
 
-            const findChanges = (original: any, modified: any, parentPath: string = '') => {
+            const findChanges = (original: any, modified: any, parentPath: string[] = []) => {
                 for (const key in modified) {
-                    const currentPath = parentPath ? `${parentPath}.${key}` : key;
+                    const currentPath = [...parentPath, key];
                     const originalValue = original?.[key];
                     const modifiedValue = modified[key];
 
                     if (typeof modifiedValue === 'object' && modifiedValue !== null && !Array.isArray(modifiedValue)) {
+                        // Si el objeto tiene 'enabled', comparar ese valor
+                        if ('enabled' in modifiedValue) {
+                            if (originalValue?.enabled !== modifiedValue.enabled) {
+                                changes.push({
+                                    path: currentPath,
+                                    value: modifiedValue
+                                });
+                            }
+                        }
                         // Recursively check nested objects
                         findChanges(originalValue, modifiedValue, currentPath);
                     } else if (originalValue !== modifiedValue) {
@@ -363,11 +373,13 @@ const EcoFacturPage = () => {
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout
 
-            const response = await fetch(`${modulesCompany.url}/api/modulos/`, {
+            const response = await fetch(`${modulesCompany.url}/api/modules/`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     'Accept': 'application/json',
+                    'Authorization': `Bearer ${modulesCompany.api_key}`,
+                    'X-API-Key': modulesCompany.api_key,
                 },
                 body: JSON.stringify({ changes }),
                 signal: controller.signal,
@@ -745,29 +757,79 @@ const EcoFacturPage = () => {
                                 </div>
                             ) : (
                                 <div className="space-y-4">
-                                    {Object.entries(localModules).map(([path, value]) => {
-                                        // Determinar si es un valor simple o un objeto con enabled
-                                        const isEnabled = typeof value === 'boolean' ? value : (value as any)?.enabled === true;
-                                        const displayName = path.split('.').pop() || path;
+                                    {Object.entries(localModules).map(([moduleName, moduleData]) => {
+                                        // Verificar si es un módulo (tiene enabled o submódulos)
+                                        const isBoolean = typeof moduleData === 'boolean';
+                                        const isModuleObject = !isBoolean && typeof moduleData === 'object' && moduleData !== null;
+                                        
+                                        if (!isBoolean && !isModuleObject) return null;
+                                        
+                                        // Estado del módulo principal
+                                        const moduleEnabled = isBoolean ? moduleData : (moduleData as any)?.enabled === true;
+                                        
+                                        // Obtener submódulos (keys que no son 'enabled', 'descripcion')
+                                        const submodules = isModuleObject 
+                                            ? Object.entries(moduleData as Record<string, any>)
+                                                .filter(([key]) => !['enabled', 'descripcion'].includes(key))
+                                            : [];
                                         
                                         return (
-                                            <div key={path} className="bg-white/5 rounded-xl border border-white/5 p-4">
-                                                <div className="flex items-center justify-between">
-                                                    <div className="flex items-center gap-3">
-                                                        <div className="w-10 h-10 rounded-lg bg-[#008a75]/20 flex items-center justify-center">
-                                                            <i className="fas fa-cube text-[#00FFB0]"></i>
+                                            <div key={moduleName} className="bg-white/5 rounded-xl border border-white/5 overflow-hidden">
+                                                {/* Módulo Principal */}
+                                                <div className="p-4">
+                                                    <div className="flex items-center justify-between">
+                                                        <div className="flex items-center gap-3">
+                                                            <div className="w-10 h-10 rounded-lg bg-[#008a75]/20 flex items-center justify-center">
+                                                                <svg className="w-5 h-5 text-[#00FFB0]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+                                                                </svg>
+                                                            </div>
+                                                            <div>
+                                                                <h4 className="font-bold capitalize">{moduleName.replace(/_/g, ' ')}</h4>
+                                                                {isModuleObject && (moduleData as any).descripcion && (
+                                                                    <p className="text-xs text-gray-500">{(moduleData as any).descripcion}</p>
+                                                                )}
+                                                            </div>
                                                         </div>
-                                                        <div>
-                                                            <h4 className="font-bold capitalize">{displayName.replace(/_/g, ' ')}</h4>
-                                                            <p className="text-xs text-gray-500">{path}</p>
-                                                        </div>
+                                                        <ToggleSwitch
+                                                            enabled={moduleEnabled}
+                                                            onChange={() => handleToggleModule(moduleName)}
+                                                            label={moduleName}
+                                                        />
                                                     </div>
-                                                    <ToggleSwitch
-                                                        enabled={isEnabled}
-                                                        onChange={() => handleToggleModule(path)}
-                                                        label={displayName}
-                                                    />
                                                 </div>
+                                                
+                                                {/* Submódulos */}
+                                                {submodules.length > 0 && (
+                                                    <div className="border-t border-white/5 bg-black/20 p-4 space-y-3">
+                                                        <p className="text-xs font-bold uppercase tracking-widest text-gray-500 mb-3">Submódulos</p>
+                                                        {submodules.map(([subName, subData]) => {
+                                                            const subEnabled = typeof subData === 'boolean' 
+                                                                ? subData 
+                                                                : (subData as any)?.enabled === true;
+                                                            const subPath = `${moduleName}.${subName}`;
+                                                            
+                                                            return (
+                                                                <div key={subPath} className="flex items-center justify-between pl-4">
+                                                                    <div className="flex items-center gap-2">
+                                                                        <div className="w-2 h-2 rounded-full bg-[#00FFB0]/30"></div>
+                                                                        <div>
+                                                                            <h5 className="text-sm font-medium capitalize">{subName.replace(/_/g, ' ')}</h5>
+                                                                            {typeof subData === 'object' && (subData as any)?.descripcion && (
+                                                                                <p className="text-xs text-gray-500">{(subData as any).descripcion}</p>
+                                                                            )}
+                                                                        </div>
+                                                                    </div>
+                                                                    <ToggleSwitch
+                                                                        enabled={subEnabled}
+                                                                        onChange={() => handleToggleModule(subPath)}
+                                                                        label={subName}
+                                                                    />
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                )}
                                             </div>
                                         );
                                     })}
