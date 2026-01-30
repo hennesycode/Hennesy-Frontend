@@ -211,12 +211,6 @@ const EcoFacturPage = () => {
         setLocalModules({});
     };
 
-    // Helper function to get nested value
-    const getNestedValue = (obj: any, path: string | string[]): any => {
-        const keys = Array.isArray(path) ? path : path.split('.');
-        return keys.reduce((current, key) => current?.[key], obj);
-    };
-
     // Helper function to set nested value
     const setNestedValue = (obj: any, path: string | string[], value: any): any => {
         const keys = Array.isArray(path) ? path : path.split('.');
@@ -229,16 +223,50 @@ const EcoFacturPage = () => {
         return obj;
     };
 
+    // Evitar warning de variable no utilizada
+    void setNestedValue;
+
     const handleToggleModule = (path: string) => {
         setLocalModules(prev => {
             const newModules = JSON.parse(JSON.stringify(prev)); // Deep copy
-            const currentValue = getNestedValue(newModules, path);
+            const keys = path.split('.');
             
-            // Toggle boolean or enabled property
-            if (typeof currentValue === 'boolean') {
-                setNestedValue(newModules, path, !currentValue);
-            } else if (typeof currentValue === 'object' && 'enabled' in currentValue) {
-                setNestedValue(newModules, `${path}.enabled`, !currentValue.enabled);
+            if (keys.length === 1) {
+                // Es un módulo de nivel superior
+                const moduleName = keys[0];
+                const currentValue = newModules[moduleName];
+                
+                if (typeof currentValue === 'boolean') {
+                    newModules[moduleName] = !currentValue;
+                } else if (Array.isArray(currentValue)) {
+                    // Si es un array de strings, no cambiamos nada (siempre habilitado)
+                    return prev;
+                } else if (typeof currentValue === 'object' && 'enabled' in currentValue) {
+                    newModules[moduleName].enabled = !currentValue.enabled;
+                }
+            } else if (keys.length === 2) {
+                // Es un submódulo
+                const [moduleName, subName] = keys;
+                
+                if (Array.isArray(newModules[moduleName])) {
+                    // Si el módulo es un array de strings, crear objeto para este submódulo
+                    const index = (newModules[moduleName] as string[]).indexOf(subName);
+                    if (index !== -1) {
+                        // Convertir array a objeto con estados booleanos
+                        const arrayToObject: Record<string, boolean> = {};
+                        (newModules[moduleName] as string[]).forEach(sub => {
+                            arrayToObject[sub] = sub !== subName ? true : false;
+                        });
+                        newModules[moduleName] = arrayToObject;
+                    }
+                } else if (typeof newModules[moduleName] === 'object') {
+                    const subModule = newModules[moduleName][subName];
+                    if (typeof subModule === 'boolean') {
+                        newModules[moduleName][subName] = !subModule;
+                    } else if (typeof subModule === 'object' && 'enabled' in subModule) {
+                        newModules[moduleName][subName].enabled = !subModule.enabled;
+                    }
+                }
             }
             
             return newModules;
@@ -265,9 +293,14 @@ const EcoFacturPage = () => {
                     const modifiedValue = modified[key];
                     const isModule = parentKey === ''; // Nivel superior = módulos
 
-                    if (typeof modifiedValue === 'object' && modifiedValue !== null && !Array.isArray(modifiedValue)) {
-                        // Si es un objeto con 'enabled'
+                    if (Array.isArray(modifiedValue)) {
+                        // Si es un array de strings (submódulos)
+                        // Los arrays de strings siempre están habilitados completos
+                        // Solo generamos cambios si el array ha sido convertido a objeto
+                    } else if (typeof modifiedValue === 'object' && modifiedValue !== null) {
+                        // Si es un objeto
                         if ('enabled' in modifiedValue) {
+                            // Si tiene 'enabled', comparar ese valor
                             if (originalValue?.enabled !== modifiedValue.enabled) {
                                 if (isModule) {
                                     changes.push({
@@ -282,9 +315,10 @@ const EcoFacturPage = () => {
                                     });
                                 }
                             }
+                        } else {
+                            // Es un objeto con submódulos, recurrir
+                            findChanges(originalValue, modifiedValue, isModule ? key : parentKey);
                         }
-                        // Recursivamente revisar sub-objetos
-                        findChanges(originalValue, modifiedValue, isModule ? key : parentKey);
                     } else if (typeof modifiedValue === 'boolean') {
                         // Si es un boolean directo
                         if (originalValue !== modifiedValue) {
@@ -694,20 +728,27 @@ const EcoFacturPage = () => {
                             ) : (
                                 <div className="space-y-4">
                                     {Object.entries(localModules).map(([moduleName, moduleData]) => {
-                                        // Verificar si es un módulo (tiene enabled o submódulos)
                                         const isBoolean = typeof moduleData === 'boolean';
-                                        const isModuleObject = !isBoolean && typeof moduleData === 'object' && moduleData !== null;
+                                        const isArrayOfStrings = Array.isArray(moduleData) && moduleData.every(item => typeof item === 'string');
+                                        const isModuleObject = !isBoolean && !isArrayOfStrings && typeof moduleData === 'object' && moduleData !== null;
                                         
-                                        if (!isBoolean && !isModuleObject) return null;
+                                        if (!isBoolean && !isArrayOfStrings && !isModuleObject) return null;
                                         
                                         // Estado del módulo principal
-                                        const moduleEnabled = isBoolean ? moduleData : (moduleData as any)?.enabled === true;
+                                        const moduleEnabled = isBoolean ? moduleData : (isArrayOfStrings ? true : (moduleData as any)?.enabled === true);
                                         
-                                        // Obtener submódulos (keys que no son 'enabled', 'descripcion')
-                                        const submodules = isModuleObject 
-                                            ? Object.entries(moduleData as Record<string, any>)
+                                        // Obtener submódulos
+                                        let submodules: Array<[string, string]> = [];
+                                        
+                                        if (isArrayOfStrings) {
+                                            // Si es array de strings, usar los strings directamente como submódulos
+                                            submodules = (moduleData as string[]).map(subName => [subName, subName]);
+                                        } else if (isModuleObject) {
+                                            // Si es un objeto, obtener solo los keys que no sean 'enabled' o 'descripcion'
+                                            submodules = Object.entries(moduleData as Record<string, any>)
                                                 .filter(([key]) => !['enabled', 'descripcion'].includes(key))
-                                            : [];
+                                                .map(([key, value]) => [key, value]);
+                                        }
                                         
                                         return (
                                             <div key={moduleName} className="bg-white/5 rounded-xl border border-white/5 overflow-hidden">
@@ -722,16 +763,18 @@ const EcoFacturPage = () => {
                                                             </div>
                                                             <div>
                                                                 <h4 className="font-bold capitalize">{moduleName.replace(/_/g, ' ')}</h4>
-                                                                {isModuleObject && (moduleData as any).descripcion && (
+                                                                {isModuleObject && (moduleData as any)?.descripcion && (
                                                                     <p className="text-xs text-gray-500">{(moduleData as any).descripcion}</p>
                                                                 )}
                                                             </div>
                                                         </div>
-                                                        <ToggleSwitch
-                                                            enabled={moduleEnabled}
-                                                            onChange={() => handleToggleModule(moduleName)}
-                                                            label={moduleName}
-                                                        />
+                                                        {!isArrayOfStrings && (
+                                                            <ToggleSwitch
+                                                                enabled={moduleEnabled}
+                                                                onChange={() => handleToggleModule(moduleName)}
+                                                                label={moduleName}
+                                                            />
+                                                        )}
                                                     </div>
                                                 </div>
                                                 
@@ -739,22 +782,30 @@ const EcoFacturPage = () => {
                                                 {submodules.length > 0 && (
                                                     <div className="border-t border-white/5 bg-black/20 p-4 space-y-3">
                                                         <p className="text-xs font-bold uppercase tracking-widest text-gray-500 mb-3">Submódulos</p>
-                                                        {submodules.map(([subName, subData]) => {
-                                                            const subEnabled = typeof subData === 'boolean' 
-                                                                ? subData 
-                                                                : (subData as any)?.enabled === true;
+                                                        {submodules.map(([subName, subDisplayName]) => {
+                                                            // Inicializar el estado del submódulo si no existe
                                                             const subPath = `${moduleName}.${subName}`;
+                                                            let subEnabled = true; // Por defecto habilitado
+                                                            
+                                                            // Obtener el estado actual del submódulo
+                                                            if (localModules[moduleName]) {
+                                                                if (Array.isArray(localModules[moduleName])) {
+                                                                    subEnabled = true; // Arrays de strings siempre habilitados
+                                                                } else if (typeof localModules[moduleName] === 'object') {
+                                                                    const subModule = (localModules[moduleName] as any)[subName];
+                                                                    if (typeof subModule === 'boolean') {
+                                                                        subEnabled = subModule;
+                                                                    } else if (typeof subModule === 'object' && subModule?.enabled !== undefined) {
+                                                                        subEnabled = subModule.enabled;
+                                                                    }
+                                                                }
+                                                            }
                                                             
                                                             return (
                                                                 <div key={subPath} className="flex items-center justify-between pl-4">
                                                                     <div className="flex items-center gap-2">
                                                                         <div className="w-2 h-2 rounded-full bg-[#00FFB0]/30"></div>
-                                                                        <div>
-                                                                            <h5 className="text-sm font-medium capitalize">{subName.replace(/_/g, ' ')}</h5>
-                                                                            {typeof subData === 'object' && (subData as any)?.descripcion && (
-                                                                                <p className="text-xs text-gray-500">{(subData as any).descripcion}</p>
-                                                                            )}
-                                                                        </div>
+                                                                        <h5 className="text-sm font-medium capitalize">{subDisplayName.replace(/_/g, ' ')}</h5>
                                                                     </div>
                                                                     <ToggleSwitch
                                                                         enabled={subEnabled}
