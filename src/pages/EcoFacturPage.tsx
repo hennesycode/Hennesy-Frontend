@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../api/client';
+import ecofacturService from '../api/ecofactur';
 
 interface Company {
     id: number;
@@ -13,8 +14,7 @@ interface Company {
 }
 
 // Estructura de módulos según API de EcoFactur
-// Los módulos pueden ser: boolean, objeto con enabled, o nested objects
-type ModuleValue = boolean | {
+type ModuleValue = boolean | string[] | {
     enabled?: boolean;
     [key: string]: any;
 };
@@ -48,36 +48,10 @@ const EcoFacturPage = () => {
     // Check health of a single company
     const checkCompanyHealth = async (company: Company): Promise<boolean> => {
         try {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 5000); // 5s timeout
-
-            const response = await fetch(`${company.url}/api/health/`, {
-                method: 'GET',
-                headers: {
-                    'Accept': 'application/json',
-                },
-                signal: controller.signal,
-            });
-
-            clearTimeout(timeoutId);
-
-            if (!response.ok) {
-                return false;
-            }
-
-            // Validar que sea JSON
-            const contentType = response.headers.get('content-type');
-            if (!contentType || !contentType.includes('application/json')) {
-                console.warn(`⚠️ ${company.name}: Health check no retornó JSON`);
-                return false;
-            }
-
-            const data = await response.json();
-            return data.status === 'ok' && data.features_loaded === true;
+            const result = await ecofacturService.checkHealthStatus(company.url);
+            return result !== null;
         } catch (error) {
-            if (error instanceof Error && error.name === 'AbortError') {
-                console.warn(`⏱️ ${company.name}: Timeout en health check`);
-            }
+            console.error(`❌ Error en health check de ${company.name}:`, error);
             return false;
         }
     };
@@ -218,54 +192,12 @@ const EcoFacturPage = () => {
         setSaveSuccess(false);
 
         try {
-            // Call the company's API directly
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
-
-            const response = await fetch(`${company.url}/api/modulos/`, {
-                method: 'GET',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Accept': 'application/json',
-                },
-                signal: controller.signal,
-            });
-
-            clearTimeout(timeoutId);
-
-            if (!response.ok) {
-                if (response.status === 401 || response.status === 403) {
-                    throw new Error('API Key inválida o sin permisos');
-                }
-                throw new Error(`Error ${response.status}: ${response.statusText}`);
-            }
-
-            // Validar content-type
-            const contentType = response.headers.get('content-type');
-            if (!contentType || !contentType.includes('application/json')) {
-                const text = await response.text();
-                console.error('❌ Respuesta no es JSON:', text.substring(0, 200));
-                throw new Error('El servidor retornó HTML en lugar de JSON. Verifique que la API esté funcionando correctamente.');
-            }
-
-            const data: ModulosData = await response.json();
-            
-            if (!data || typeof data !== 'object') {
-                throw new Error('Respuesta inválida: se esperaba un objeto con los módulos');
-            }
-
+            const data = await ecofacturService.getModules(company.url);
             setModulesData(data);
             setLocalModules(JSON.parse(JSON.stringify(data))); // Deep copy
         } catch (err: any) {
             console.error('Error fetching modules:', err);
-            
-            if (err.name === 'AbortError') {
-                setModulesError('⏱️ Timeout: El servidor no respondió a tiempo');
-            } else if (err.message.includes('Failed to fetch')) {
-                setModulesError('🌐 Error de red: No se puede conectar al servidor');
-            } else {
-                setModulesError(err.message || 'Error al cargar los módulos');
-            }
+            setModulesError(err.message || 'Error al cargar los módulos');
         } finally {
             setModulesLoading(false);
         }
@@ -322,36 +254,53 @@ const EcoFacturPage = () => {
         setSaveSuccess(false);
 
         try {
-            // Build changes array by comparing original and modified data
-            const changes: Array<{
-                path: string[];
-                value: any;
-            }> = [];
+            // Comparar original con modificados y construir array de cambios
+            const changes: Array<{ module: string; submodule?: string; enabled: boolean }> = [];
 
-            const findChanges = (original: any, modified: any, parentPath: string[] = []) => {
+            const findChanges = (original: any, modified: any, parentKey: string = '') => {
                 for (const key in modified) {
-                    const currentPath = [...parentPath, key];
+                    if (['enabled', 'descripcion'].includes(key)) continue;
+
                     const originalValue = original?.[key];
                     const modifiedValue = modified[key];
+                    const isModule = parentKey === ''; // Nivel superior = módulos
 
                     if (typeof modifiedValue === 'object' && modifiedValue !== null && !Array.isArray(modifiedValue)) {
-                        // Si el objeto tiene 'enabled', comparar ese valor
+                        // Si es un objeto con 'enabled'
                         if ('enabled' in modifiedValue) {
                             if (originalValue?.enabled !== modifiedValue.enabled) {
+                                if (isModule) {
+                                    changes.push({
+                                        module: key,
+                                        enabled: modifiedValue.enabled
+                                    });
+                                } else {
+                                    changes.push({
+                                        module: parentKey,
+                                        submodule: key,
+                                        enabled: modifiedValue.enabled
+                                    });
+                                }
+                            }
+                        }
+                        // Recursivamente revisar sub-objetos
+                        findChanges(originalValue, modifiedValue, isModule ? key : parentKey);
+                    } else if (typeof modifiedValue === 'boolean') {
+                        // Si es un boolean directo
+                        if (originalValue !== modifiedValue) {
+                            if (isModule) {
                                 changes.push({
-                                    path: currentPath,
-                                    value: modifiedValue
+                                    module: key,
+                                    enabled: modifiedValue
+                                });
+                            } else {
+                                changes.push({
+                                    module: parentKey,
+                                    submodule: key,
+                                    enabled: modifiedValue
                                 });
                             }
                         }
-                        // Recursively check nested objects
-                        findChanges(originalValue, modifiedValue, currentPath);
-                    } else if (originalValue !== modifiedValue) {
-                        // Value has changed
-                        changes.push({
-                            path: currentPath,
-                            value: modifiedValue
-                        });
                     }
                 }
             };
@@ -368,72 +317,40 @@ const EcoFacturPage = () => {
                 return;
             }
 
-            console.log('📤 Sending changes to EcoFactur:', changes);
+            console.log('📤 Enviando cambios a EcoFactur:', changes);
 
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout
+            // Aplicar cambios en paralelo
+            const results = await Promise.all(
+                changes.map(change =>
+                    ecofacturService.toggleModule(
+                        modulesCompany.url,
+                        modulesCompany.api_key,
+                        change
+                    )
+                )
+            );
 
-            const response = await fetch(`${modulesCompany.url}/api/modules/`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Accept': 'application/json',
-                    'Authorization': `Bearer ${modulesCompany.api_key}`,
-                    'X-API-Key': modulesCompany.api_key,
-                },
-                body: JSON.stringify({ changes }),
-                signal: controller.signal,
-            });
-
-            clearTimeout(timeoutId);
-
-            if (!response.ok) {
-                // Validar content-type del error
-                const contentType = response.headers.get('content-type');
-                if (contentType && contentType.includes('application/json')) {
-                    const errorData = await response.json().catch(() => ({}));
-                    throw new Error(errorData.message || errorData.error || `Error ${response.status}`);
-                } else {
-                    throw new Error(`Error ${response.status}: ${response.statusText}`);
-                }
+            // Verificar si todos fueron exitosos
+            const allSuccess = results.every(r => r.success === true);
+            if (!allSuccess) {
+                throw new Error('Algunos cambios no se aplicaron correctamente');
             }
 
-            // Validar response content-type
-            const contentType = response.headers.get('content-type');
-            if (!contentType || !contentType.includes('application/json')) {
-                throw new Error('El servidor no retornó JSON válido');
-            }
-
-            const result = await response.json();
-
-            // Verificar respuesta según documentación de EcoFactur
-            if (result.success === false) {
-                throw new Error(result.error || 'Error al actualizar módulos');
-            }
-
-            // Actualización exitosa
+            console.log('✅ Cambios aplicados exitosamente');
             setSaveSuccess(true);
-            
+
             // Recargar módulos para obtener estado actualizado
-            if (result.features) {
-                setModulesData(result.features);
-                setLocalModules(JSON.parse(JSON.stringify(result.features)));
-            }
-            
+            const updatedModules = await ecofacturService.getModules(modulesCompany.url);
+            setModulesData(updatedModules);
+            setLocalModules(JSON.parse(JSON.stringify(updatedModules)));
+
             // Close modal after short delay to show success
             setTimeout(() => {
                 handleCloseModulesModal();
             }, 1500);
         } catch (err: any) {
             console.error('Error saving modules:', err);
-            
-            if (err.name === 'AbortError') {
-                setModulesError('⏱️ Timeout: El servidor tardó demasiado en responder');
-            } else if (err.message.includes('Failed to fetch')) {
-                setModulesError('🌐 Error de red: No se pudo conectar al servidor');
-            } else {
-                setModulesError(err.message || 'Error al guardar los módulos');
-            }
+            setModulesError(err.message || 'Error al guardar los módulos');
         } finally {
             setSavingModules(false);
         }
@@ -513,6 +430,25 @@ const EcoFacturPage = () => {
                     </div>
                 </div>
 
+                {/* API Documentation Banner */}
+                <div className="mb-8 p-4 rounded-xl bg-blue-500/10 border border-blue-500/30 backdrop-blur-sm">
+                    <div className="flex items-start gap-3">
+                        <div className="flex-shrink-0 mt-0.5">
+                            <svg className="w-5 h-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                        </div>
+                        <div className="flex-grow">
+                            <h3 className="font-bold text-blue-400 text-sm mb-1">💡 API Endpoints Disponibles</h3>
+                            <p className="text-blue-300/80 text-xs">
+                                GET <code className="bg-blue-500/20 px-2 py-1 rounded">/api/health/</code> • 
+                                GET <code className="bg-blue-500/20 px-2 py-1 rounded ml-2">/configuracion/api/modulos/</code> • 
+                                POST <code className="bg-blue-500/20 px-2 py-1 rounded ml-2">/configuracion/api/toggle-module/</code>
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
                 {/* Error Message */}
                 {error && (
                     <div className="mb-6 p-4 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-sm">
@@ -572,12 +508,12 @@ const EcoFacturPage = () => {
                                             ) : connectionStatus[company.id] ? (
                                                 <>
                                                     <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
-                                                    <span className="text-[10px] text-green-400">Conectado</span>
+                                                    <span className="text-[10px] text-green-400">✅ Conectado</span>
                                                 </>
                                             ) : (
                                                 <>
                                                     <span className="w-2 h-2 rounded-full bg-red-500"></span>
-                                                    <span className="text-[10px] text-red-400">Desconectado</span>
+                                                    <span className="text-[10px] text-red-400">❌ Desconectado</span>
                                                 </>
                                             )}
                                         </div>
