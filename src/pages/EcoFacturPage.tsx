@@ -312,14 +312,6 @@ const EcoFacturPage = () => {
         });
     };
 
-    const handleChangeValue = (path: string, value: any) => {
-        setLocalModules(prev => {
-            const newModules = JSON.parse(JSON.stringify(prev)); // Deep copy
-            setNestedValue(newModules, path, value);
-            return newModules;
-        });
-    };
-
     // Save modules to API
     const handleSaveModules = async () => {
         if (!modulesCompany) return;
