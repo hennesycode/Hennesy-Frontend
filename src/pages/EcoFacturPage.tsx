@@ -12,29 +12,14 @@ interface Company {
     updated_at: string;
 }
 
-interface SubFuncion {
-    clave: string;
-    nombre: string;
-    descripcion: string;
-    habilitado: boolean;
-    configuracion_extra?: {
-        tipo_factura?: number;
-    } | null;
-}
+// Estructura de módulos según API de EcoFactur
+// Los módulos pueden ser: boolean, objeto con enabled, o nested objects
+type ModuleValue = boolean | {
+    enabled?: boolean;
+    [key: string]: any;
+};
 
-interface Modulo {
-    clave: string;
-    nombre: string;
-    descripcion: string;
-    icono: string;
-    habilitado: boolean;
-    subfunciones?: Record<string, SubFuncion>;
-}
-
-interface ModulosResponse {
-    total_modulos: number;
-    modulos: Record<string, Modulo>;
-}
+type ModulosData = Record<string, ModuleValue>;
 
 const EcoFacturPage = () => {
     const [companies, setCompanies] = useState<Company[]>([]);
@@ -53,10 +38,10 @@ const EcoFacturPage = () => {
     // Modules modal state
     const [isModulesModalOpen, setIsModulesModalOpen] = useState(false);
     const [modulesCompany, setModulesCompany] = useState<Company | null>(null);
-    const [, setModulesData] = useState<ModulosResponse | null>(null);
+    const [modulesData, setModulesData] = useState<ModulosData | null>(null);
     const [modulesLoading, setModulesLoading] = useState(false);
     const [modulesError, setModulesError] = useState<string | null>(null);
-    const [localModules, setLocalModules] = useState<Record<string, Modulo>>({});
+    const [localModules, setLocalModules] = useState<ModulosData>({});
     const [savingModules, setSavingModules] = useState(false);
     const [saveSuccess, setSaveSuccess] = useState(false);
 
@@ -68,17 +53,31 @@ const EcoFacturPage = () => {
 
             const response = await fetch(`${company.url}/api/health/`, {
                 method: 'GET',
+                headers: {
+                    'Accept': 'application/json',
+                },
                 signal: controller.signal,
             });
 
             clearTimeout(timeoutId);
 
-            if (response.ok) {
-                const data = await response.json();
-                return data.status === 'ok';
+            if (!response.ok) {
+                return false;
             }
-            return false;
-        } catch {
+
+            // Validar que sea JSON
+            const contentType = response.headers.get('content-type');
+            if (!contentType || !contentType.includes('application/json')) {
+                console.warn(`⚠️ ${company.name}: Health check no retornó JSON`);
+                return false;
+            }
+
+            const data = await response.json();
+            return data.status === 'ok' && data.features_loaded === true;
+        } catch (error) {
+            if (error instanceof Error && error.name === 'AbortError') {
+                console.warn(`⏱️ ${company.name}: Timeout en health check`);
+            }
             return false;
         }
     };
@@ -220,24 +219,53 @@ const EcoFacturPage = () => {
 
         try {
             // Call the company's API directly
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
+
             const response = await fetch(`${company.url}/api/modulos/`, {
                 method: 'GET',
                 headers: {
-                    'X-API-Key': company.api_key,
                     'Content-Type': 'application/json',
+                    'Accept': 'application/json',
                 },
+                signal: controller.signal,
             });
 
+            clearTimeout(timeoutId);
+
             if (!response.ok) {
+                if (response.status === 401 || response.status === 403) {
+                    throw new Error('API Key inválida o sin permisos');
+                }
                 throw new Error(`Error ${response.status}: ${response.statusText}`);
             }
 
-            const data: ModulosResponse = await response.json();
+            // Validar content-type
+            const contentType = response.headers.get('content-type');
+            if (!contentType || !contentType.includes('application/json')) {
+                const text = await response.text();
+                console.error('❌ Respuesta no es JSON:', text.substring(0, 200));
+                throw new Error('El servidor retornó HTML en lugar de JSON. Verifique que la API esté funcionando correctamente.');
+            }
+
+            const data: ModulosData = await response.json();
+            
+            if (!data || typeof data !== 'object') {
+                throw new Error('Respuesta inválida: se esperaba un objeto con los módulos');
+            }
+
             setModulesData(data);
-            setLocalModules(JSON.parse(JSON.stringify(data.modulos))); // Deep copy
+            setLocalModules(JSON.parse(JSON.stringify(data))); // Deep copy
         } catch (err: any) {
             console.error('Error fetching modules:', err);
-            setModulesError(err.message || 'Error al cargar los módulos');
+            
+            if (err.name === 'AbortError') {
+                setModulesError('⏱️ Timeout: El servidor no respondió a tiempo');
+            } else if (err.message.includes('Failed to fetch')) {
+                setModulesError('🌐 Error de red: No se puede conectar al servidor');
+            } else {
+                setModulesError(err.message || 'Error al cargar los módulos');
+            }
         } finally {
             setModulesLoading(false);
         }
@@ -251,49 +279,45 @@ const EcoFacturPage = () => {
         setLocalModules({});
     };
 
-    const handleToggleModule = (moduloClave: string) => {
-        setLocalModules(prev => ({
-            ...prev,
-            [moduloClave]: {
-                ...prev[moduloClave],
-                habilitado: !prev[moduloClave].habilitado
-            }
-        }));
+    // Helper function to get nested value
+    const getNestedValue = (obj: any, path: string): any => {
+        return path.split('.').reduce((current, key) => current?.[key], obj);
     };
 
-    const handleToggleSubfuncion = (moduloClave: string, subfuncionClave: string) => {
-        setLocalModules(prev => ({
-            ...prev,
-            [moduloClave]: {
-                ...prev[moduloClave],
-                subfunciones: {
-                    ...prev[moduloClave].subfunciones,
-                    [subfuncionClave]: {
-                        ...prev[moduloClave].subfunciones![subfuncionClave],
-                        habilitado: !prev[moduloClave].subfunciones![subfuncionClave].habilitado
-                    }
-                }
-            }
-        }));
+    // Helper function to set nested value
+    const setNestedValue = (obj: any, path: string, value: any): any => {
+        const keys = path.split('.');
+        const lastKey = keys.pop()!;
+        const target = keys.reduce((current, key) => {
+            if (!current[key]) current[key] = {};
+            return current[key];
+        }, obj);
+        target[lastKey] = value;
+        return obj;
     };
 
-    const handleChangeTipoFactura = (moduloClave: string, subfuncionClave: string, value: number) => {
-        setLocalModules(prev => ({
-            ...prev,
-            [moduloClave]: {
-                ...prev[moduloClave],
-                subfunciones: {
-                    ...prev[moduloClave].subfunciones,
-                    [subfuncionClave]: {
-                        ...prev[moduloClave].subfunciones![subfuncionClave],
-                        configuracion_extra: {
-                            ...(prev[moduloClave].subfunciones![subfuncionClave].configuracion_extra || {}),
-                            tipo_factura: value
-                        }
-                    }
-                }
+    const handleToggleModule = (path: string) => {
+        setLocalModules(prev => {
+            const newModules = JSON.parse(JSON.stringify(prev)); // Deep copy
+            const currentValue = getNestedValue(newModules, path);
+            
+            // Toggle boolean or enabled property
+            if (typeof currentValue === 'boolean') {
+                setNestedValue(newModules, path, !currentValue);
+            } else if (typeof currentValue === 'object' && 'enabled' in currentValue) {
+                setNestedValue(newModules, `${path}.enabled`, !currentValue.enabled);
             }
-        }));
+            
+            return newModules;
+        });
+    };
+
+    const handleChangeValue = (path: string, value: any) => {
+        setLocalModules(prev => {
+            const newModules = JSON.parse(JSON.stringify(prev)); // Deep copy
+            setNestedValue(newModules, path, value);
+            return newModules;
+        });
     };
 
     // Save modules to API
@@ -305,74 +329,107 @@ const EcoFacturPage = () => {
         setSaveSuccess(false);
 
         try {
-            // Build bulk update payload
-            const modulosToUpdate: Array<{
-                module: string;
-                enabled: boolean;
-                subfeature?: string;
-                extra?: Record<string, unknown>;
+            // Build changes array by comparing original and modified data
+            const changes: Array<{
+                path: string;
+                value: any;
             }> = [];
 
-            // Iterate through all modules and subfunctions
-            Object.entries(localModules).forEach(([moduleClave, modulo]) => {
-                // Add main module
-                modulosToUpdate.push({
-                    module: moduleClave,
-                    enabled: modulo.habilitado
-                });
+            const findChanges = (original: any, modified: any, parentPath: string = '') => {
+                for (const key in modified) {
+                    const currentPath = parentPath ? `${parentPath}.${key}` : key;
+                    const originalValue = original?.[key];
+                    const modifiedValue = modified[key];
 
-                // Add subfunctions if they exist
-                if (modulo.subfunciones) {
-                    Object.entries(modulo.subfunciones).forEach(([subClave, subfuncion]) => {
-                        const updateItem: {
-                            module: string;
-                            enabled: boolean;
-                            subfeature: string;
-                            extra?: Record<string, unknown>;
-                        } = {
-                            module: moduleClave,
-                            subfeature: subClave,
-                            enabled: subfuncion.habilitado
-                        };
-
-                        // Add extra config if exists
-                        if (subfuncion.configuracion_extra) {
-                            updateItem.extra = subfuncion.configuracion_extra as Record<string, unknown>;
-                        }
-
-                        modulosToUpdate.push(updateItem);
-                    });
+                    if (typeof modifiedValue === 'object' && modifiedValue !== null && !Array.isArray(modifiedValue)) {
+                        // Recursively check nested objects
+                        findChanges(originalValue, modifiedValue, currentPath);
+                    } else if (originalValue !== modifiedValue) {
+                        // Value has changed
+                        changes.push({
+                            path: currentPath,
+                            value: modifiedValue
+                        });
+                    }
                 }
-            });
+            };
+
+            findChanges(modulesData, localModules);
+
+            // Si no hay cambios, cerrar modal
+            if (changes.length === 0) {
+                setSaveSuccess(true);
+                setTimeout(() => {
+                    handleCloseModulesModal();
+                }, 500);
+                setSavingModules(false);
+                return;
+            }
+
+            console.log('📤 Sending changes to EcoFactur:', changes);
+
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout
 
             const response = await fetch(`${modulesCompany.url}/api/modulos/`, {
                 method: 'POST',
                 headers: {
-                    'X-API-Key': modulesCompany.api_key,
                     'Content-Type': 'application/json',
+                    'Accept': 'application/json',
                 },
-                body: JSON.stringify({ modulos: modulosToUpdate }),
+                body: JSON.stringify({ changes }),
+                signal: controller.signal,
             });
 
+            clearTimeout(timeoutId);
+
             if (!response.ok) {
-                const errorData = await response.json().catch(() => ({}));
-                throw new Error(errorData.message || `Error ${response.status}: ${response.statusText}`);
+                // Validar content-type del error
+                const contentType = response.headers.get('content-type');
+                if (contentType && contentType.includes('application/json')) {
+                    const errorData = await response.json().catch(() => ({}));
+                    throw new Error(errorData.message || errorData.error || `Error ${response.status}`);
+                } else {
+                    throw new Error(`Error ${response.status}: ${response.statusText}`);
+                }
+            }
+
+            // Validar response content-type
+            const contentType = response.headers.get('content-type');
+            if (!contentType || !contentType.includes('application/json')) {
+                throw new Error('El servidor no retornó JSON válido');
             }
 
             const result = await response.json();
 
-            if (result.total_errores > 0) {
-                setModulesError(`Se actualizaron ${result.total_actualizados} módulos, pero hubo ${result.total_errores} errores`);
-            } else {
-                setSaveSuccess(true);
-                // Close modal after short delay to show success
-                setTimeout(() => {
-                    handleCloseModulesModal();
-                }, 1000);
+            // Verificar respuesta según documentación de EcoFactur
+            if (result.success === false) {
+                throw new Error(result.error || 'Error al actualizar módulos');
             }
+
+            // Actualización exitosa
+            setSaveSuccess(true);
+            
+            // Recargar módulos para obtener estado actualizado
+            if (result.features) {
+                setModulesData(result.features);
+                setLocalModules(JSON.parse(JSON.stringify(result.features)));
+            }
+            
+            // Close modal after short delay to show success
+            setTimeout(() => {
+                handleCloseModulesModal();
+            }, 1500);
         } catch (err: any) {
             console.error('Error saving modules:', err);
-            setModulesError(err.message || 'Error al guardar los módulos');
+            
+            if (err.name === 'AbortError') {
+                setModulesError('⏱️ Timeout: El servidor tardó demasiado en responder');
+            } else if (err.message.includes('Failed to fetch')) {
+                setModulesError('🌐 Error de red: No se pudo conectar al servidor');
+            } else {
+                setModulesError(err.message || 'Error al guardar los módulos');
+            }
         } finally {
             setSavingModules(false);
         }
@@ -696,74 +753,32 @@ const EcoFacturPage = () => {
                                 </div>
                             ) : (
                                 <div className="space-y-4">
-                                    {Object.entries(localModules).map(([clave, modulo]) => (
-                                        <div key={clave} className="bg-white/5 rounded-xl border border-white/5 overflow-hidden">
-                                            {/* Module Header */}
-                                            <div className="p-4 flex items-center justify-between">
-                                                <div className="flex items-center gap-3">
-                                                    <div className="w-10 h-10 rounded-lg bg-[#008a75]/20 flex items-center justify-center">
-                                                        <i className={`fas ${modulo.icono} text-[#00FFB0]`}></i>
-                                                    </div>
-                                                    <div>
-                                                        <h4 className="font-bold">{modulo.nombre}</h4>
-                                                        <p className="text-xs text-gray-500">{modulo.descripcion}</p>
-                                                    </div>
-                                                </div>
-                                                <ToggleSwitch
-                                                    enabled={modulo.habilitado}
-                                                    onChange={() => handleToggleModule(clave)}
-                                                    label={modulo.nombre}
-                                                />
-                                            </div>
-
-                                            {/* Subfunciones */}
-                                            {modulo.subfunciones && Object.keys(modulo.subfunciones).length > 0 && (
-                                                <div className="border-t border-white/5 bg-black/20">
-                                                    {Object.entries(modulo.subfunciones).map(([subClave, subfuncion]) => (
-                                                        <div key={subClave} className="p-4 pl-16 flex items-center justify-between border-b border-white/5 last:border-b-0">
-                                                            <div>
-                                                                <h5 className="font-medium text-sm">{subfuncion.nombre}</h5>
-                                                                <p className="text-xs text-gray-500">{subfuncion.descripcion}</p>
-                                                                {/* Tipo Factura selector */}
-                                                                {subfuncion.configuracion_extra?.tipo_factura !== undefined && (
-                                                                    <div className="mt-2 flex items-center gap-2">
-                                                                        <span className="text-xs text-gray-400">Tipo Factura:</span>
-                                                                        <div className="flex gap-1">
-                                                                            <button
-                                                                                type="button"
-                                                                                onClick={() => handleChangeTipoFactura(clave, subClave, 1)}
-                                                                                className={`px-3 py-1 rounded text-xs font-bold transition-all ${subfuncion.configuracion_extra.tipo_factura === 1
-                                                                                    ? 'bg-[#00FFB0] text-[#050b09]'
-                                                                                    : 'bg-white/10 text-gray-400 hover:bg-white/20'
-                                                                                    }`}
-                                                                            >
-                                                                                1
-                                                                            </button>
-                                                                            <button
-                                                                                type="button"
-                                                                                onClick={() => handleChangeTipoFactura(clave, subClave, 2)}
-                                                                                className={`px-3 py-1 rounded text-xs font-bold transition-all ${subfuncion.configuracion_extra.tipo_factura === 2
-                                                                                    ? 'bg-[#00FFB0] text-[#050b09]'
-                                                                                    : 'bg-white/10 text-gray-400 hover:bg-white/20'
-                                                                                    }`}
-                                                                            >
-                                                                                2
-                                                                            </button>
-                                                                        </div>
-                                                                    </div>
-                                                                )}
-                                                            </div>
-                                                            <ToggleSwitch
-                                                                enabled={subfuncion.habilitado}
-                                                                onChange={() => handleToggleSubfuncion(clave, subClave)}
-                                                                label={subfuncion.nombre}
-                                                            />
+                                    {Object.entries(localModules).map(([path, value]) => {
+                                        // Determinar si es un valor simple o un objeto con enabled
+                                        const isEnabled = typeof value === 'boolean' ? value : (value as any)?.enabled === true;
+                                        const displayName = path.split('.').pop() || path;
+                                        
+                                        return (
+                                            <div key={path} className="bg-white/5 rounded-xl border border-white/5 p-4">
+                                                <div className="flex items-center justify-between">
+                                                    <div className="flex items-center gap-3">
+                                                        <div className="w-10 h-10 rounded-lg bg-[#008a75]/20 flex items-center justify-center">
+                                                            <i className="fas fa-cube text-[#00FFB0]"></i>
                                                         </div>
-                                                    ))}
+                                                        <div>
+                                                            <h4 className="font-bold capitalize">{displayName.replace(/_/g, ' ')}</h4>
+                                                            <p className="text-xs text-gray-500">{path}</p>
+                                                        </div>
+                                                    </div>
+                                                    <ToggleSwitch
+                                                        enabled={isEnabled}
+                                                        onChange={() => handleToggleModule(path)}
+                                                        label={displayName}
+                                                    />
                                                 </div>
-                                            )}
-                                        </div>
-                                    ))}
+                                            </div>
+                                        );
+                                    })}
                                 </div>
                             )}
                         </div>
