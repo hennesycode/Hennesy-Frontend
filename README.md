@@ -1,17 +1,45 @@
-# Hennesy Frontend
+# ⚛️ Frontend - React + TypeScript
 
-React SPA con Vite para el sistema Hennesy.
+Panel de administración para el sistema Hennesy.
 
-## 🚀 Desarrollo Local
+**Stack:** React 19.2.0 + TypeScript + Vite + TailwindCSS  
+**Status:** ✅ Optimizado (v2.1.0)
+
+---
+
+## ⚡ Inicio Rápido
 
 ```bash
+# Instalar dependencias
 npm install
+
+# Correr en desarrollo
 npm run dev
 ```
 
-App corre en `http://localhost:5173`
+✅ App disponible en `http://localhost:5173`
 
-## 🐳 Producción con Docker
+---
+
+## 📚 Documentación
+
+Consulta la documentación completa en la carpeta [docs/](docs/):
+
+- **[ARCHITECTURE.md](docs/ARCHITECTURE.md)** - Especificación y estructura
+- **[ECOFACTUR.md](docs/ECOFACTUR.md)** - Integración API EcoFactur (v2.1.0)
+- **[CHANGELOG.md](docs/CHANGELOG.md)** - Historial de versiones
+- **[INDEX.md](docs/INDEX.md)** - Índice de documentación
+
+### Features
+
+- ✅ **Login** - Autenticación segura
+- ✅ **Dashboard** - Panel principal
+- ✅ **EcoFactur** - Gestión de módulos con cascada
+- ✅ **Diseño Dark** - Premium y moderno
+
+---
+
+## 🏗️ Comandos
 
 ### 1. Configurar Variables de Entorno
 
