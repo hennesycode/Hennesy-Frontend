@@ -738,16 +738,15 @@ const EcoFacturPage = () => {
                                         const moduleEnabled = isBoolean ? moduleData : (isArrayOfStrings ? true : (moduleData as any)?.enabled === true);
                                         
                                         // Obtener submódulos
-                                        let submodules: Array<[string, string]> = [];
+                                        let submodules: Array<[string, any]> = [];
                                         
                                         if (isArrayOfStrings) {
                                             // Si es array de strings, usar los strings directamente como submódulos
-                                            submodules = (moduleData as string[]).map(subName => [subName, subName]);
+                                            submodules = (moduleData as string[]).map(subName => [subName, true]);
                                         } else if (isModuleObject) {
                                             // Si es un objeto, obtener solo los keys que no sean 'enabled' o 'descripcion'
                                             submodules = Object.entries(moduleData as Record<string, any>)
-                                                .filter(([key]) => !['enabled', 'descripcion'].includes(key))
-                                                .map(([key, value]) => [key, value]);
+                                                .filter(([key]) => !['enabled', 'descripcion'].includes(key));
                                         }
                                         
                                         return (
@@ -782,7 +781,7 @@ const EcoFacturPage = () => {
                                                 {submodules.length > 0 && (
                                                     <div className="border-t border-white/5 bg-black/20 p-4 space-y-3">
                                                         <p className="text-xs font-bold uppercase tracking-widest text-gray-500 mb-3">Submódulos</p>
-                                                        {submodules.map(([subName, subDisplayName]) => {
+                                                        {submodules.map(([subName, _subData]) => {
                                                             // Inicializar el estado del submódulo si no existe
                                                             const subPath = `${moduleName}.${subName}`;
                                                             let subEnabled = true; // Por defecto habilitado
@@ -805,7 +804,7 @@ const EcoFacturPage = () => {
                                                                 <div key={subPath} className="flex items-center justify-between pl-4">
                                                                     <div className="flex items-center gap-2">
                                                                         <div className="w-2 h-2 rounded-full bg-[#00FFB0]/30"></div>
-                                                                        <h5 className="text-sm font-medium capitalize">{subDisplayName.replace(/_/g, ' ')}</h5>
+                                                                        <h5 className="text-sm font-medium capitalize">{subName.replace(/_/g, ' ')}</h5>
                                                                     </div>
                                                                     <ToggleSwitch
                                                                         enabled={subEnabled}
