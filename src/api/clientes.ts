@@ -2,6 +2,7 @@ import api from './client';
 
 export interface Cliente {
     id: number;
+    user_id: number;
     cliente_id: string; // HE-XXXXX
     first_name: string;
     last_name: string;
