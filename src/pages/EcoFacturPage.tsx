@@ -783,9 +783,13 @@ const EcoFacturPage = () => {
                             ) : (
                                 <div className="space-y-4">
                                     {Object.entries(localModules).map(([moduleName, moduleData]) => {
+                                        console.log(`🔎 Procesando módulo: ${moduleName}`, moduleData);
+                                        
                                         const isBoolean = typeof moduleData === 'boolean';
                                         const isArrayOfStrings = Array.isArray(moduleData) && moduleData.every(item => typeof item === 'string');
                                         const isModuleObject = !isBoolean && !isArrayOfStrings && typeof moduleData === 'object' && moduleData !== null;
+                                        
+                                        console.log(`  isBoolean: ${isBoolean}, isArray: ${isArrayOfStrings}, isObject: ${isModuleObject}`);
                                         
                                         if (!isBoolean && !isArrayOfStrings && !isModuleObject) return null;
                                         
@@ -801,14 +805,17 @@ const EcoFacturPage = () => {
                                         } else if (isModuleObject) {
                                             // Formato v2.4.0: { enabled: true, submodulos: { sub1: true } }
                                             if ('submodulos' in moduleData && typeof (moduleData as any).submodulos === 'object') {
-                                                submodules = Object.entries((moduleData as any).submodulos)
-                                                    .filter(([key]) => !['enabled', 'descripcion'].includes(key));
+                                                const submodulosObj = (moduleData as any).submodulos;
+                                                console.log(`📦 ${moduleName} - submodulos encontrados:`, submodulosObj);
+                                                submodules = Object.entries(submodulosObj);
                                             } else {
                                                 // Formato alternativo: { enabled: true, sub1: true }
                                                 submodules = Object.entries(moduleData as Record<string, any>)
                                                     .filter(([key]) => !['enabled', 'descripcion', 'submodulos'].includes(key));
                                             }
                                         }
+                                        
+                                        console.log(`🔍 ${moduleName} tiene ${submodules.length} submódulos:`, submodules);
                                         
                                         return (
                                             <div key={moduleName} className="bg-white/5 rounded-xl border border-white/5 overflow-hidden">
