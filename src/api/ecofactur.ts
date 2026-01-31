@@ -90,6 +90,19 @@ export async function getModules(url: string, timeoutMs: number = 10000): Promis
 
     clearTimeout(timeoutId);
 
+    const contentType = response.headers.get('content-type');
+    const isJson = contentType && contentType.includes('application/json');
+
+    // LEER EL BODY UNA SOLA VEZ
+    let data: ModulesResponse;
+    
+    try {
+      data = await response.json();
+    } catch (parseError) {
+      console.error('❌ Error al parsear JSON:', parseError);
+      throw new Error('El servidor retornó una respuesta inválida');
+    }
+
     if (!response.ok) {
       const errorMsg = response.status === 401 || response.status === 403
         ? 'API Key inválida o sin permisos'
@@ -97,14 +110,10 @@ export async function getModules(url: string, timeoutMs: number = 10000): Promis
       throw new Error(errorMsg);
     }
 
-    const contentType = response.headers.get('content-type');
-    if (!contentType || !contentType.includes('application/json')) {
-      const text = await response.text();
-      console.error('❌ Respuesta no es JSON:', text.substring(0, 200));
+    if (!isJson) {
+      console.error('❌ Respuesta no es JSON válido');
       throw new Error('El servidor retornó HTML en lugar de JSON. Verifique que la API esté funcionando correctamente.');
     }
-
-    const data: ModulesResponse = await response.json();
 
     if (!data || typeof data !== 'object') {
       throw new Error('Respuesta inválida: se esperaba un objeto con los módulos');
