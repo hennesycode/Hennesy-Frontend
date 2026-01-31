@@ -808,10 +808,15 @@ const EcoFacturPage = () => {
                                                 const submodulosObj = (moduleData as any).submodulos;
                                                 console.log(`📦 ${moduleName} - submodulos encontrados:`, submodulosObj);
                                                 submodules = Object.entries(submodulosObj);
+                                            } else if ('Submodulos' in moduleData && typeof (moduleData as any).Submodulos === 'object') {
+                                                // Caso alternativo con mayúscula
+                                                const submodulosObj = (moduleData as any).Submodulos;
+                                                console.log(`📦 ${moduleName} - Submodulos (mayúscula) encontrados:`, submodulosObj);
+                                                submodules = Object.entries(submodulosObj);
                                             } else {
                                                 // Formato alternativo: { enabled: true, sub1: true }
                                                 submodules = Object.entries(moduleData as Record<string, any>)
-                                                    .filter(([key]) => !['enabled', 'descripcion', 'submodulos'].includes(key));
+                                                    .filter(([key]) => !['enabled', 'descripcion', 'submodulos', 'Submodulos', 'Enabled', 'Descripcion'].includes(key));
                                             }
                                         }
                                         
