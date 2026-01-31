@@ -187,8 +187,7 @@ const ClientModal: React.FC<ClientModalProps> = ({ isOpen, onClose, onSave, clie
                                 value={formData.email}
                                 onChange={handleChange}
                                 required
-                                disabled={!!clientToEdit} // Can't change email usually as it's the identifier
-                                className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-2.5 text-white focus:border-[#00FFB0] focus:ring-1 focus:ring-[#00FFB0] outline-none transition-all placeholder-gray-600 disabled:opacity-50"
+                                className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-2.5 text-white focus:border-[#00FFB0] focus:ring-1 focus:ring-[#00FFB0] outline-none transition-all placeholder-gray-600"
                                 placeholder="correo@ejemplo.com"
                             />
                         </div>
