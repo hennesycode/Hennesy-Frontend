@@ -155,24 +155,22 @@ export async function toggleModule(
 
     clearTimeout(timeoutId);
 
-    // Intentar parsear respuesta como JSON
+    // Verificar tipo de contenido
     const contentType = response.headers.get('content-type');
     const isJson = contentType && contentType.includes('application/json');
     
-    let errorMsg = `Error ${response.status}: ${response.statusText}`;
-    let errorData: any = null;
-
-    if (isJson) {
-      try {
-        errorData = await response.json();
-        errorMsg = errorData.message || errorData.error || errorMsg;
-      } catch {
-        // Si no se puede parsear, usar el mensaje por defecto
-      }
+    // Validar que la respuesta es JSON
+    if (!isJson) {
+      throw new Error('El servidor no retornó JSON válido');
     }
 
-    // Verificar estado
+    // Leer el body UNA SOLA VEZ
+    const result: ToggleModuleResponse = await response.json();
+
+    // Verificar estado después de parsear
     if (!response.ok) {
+      const errorMsg = result.message || result.error || `Error ${response.status}: ${response.statusText}`;
+      
       // Códigos específicos de error
       if (response.status === 401) {
         throw new Error('❌ 401: Falta header X-API-Key');
@@ -184,13 +182,7 @@ export async function toggleModule(
       throw new Error(errorMsg);
     }
 
-    // Validar que fue JSON
-    if (!isJson) {
-      throw new Error('El servidor no retornó JSON válido');
-    }
-
-    const result: ToggleModuleResponse = await response.json();
-
+    // Verificar success en la respuesta
     if (result.success === false) {
       throw new Error(result.message || 'Error al actualizar el módulo');
     }
