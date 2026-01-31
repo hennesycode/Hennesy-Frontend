@@ -284,62 +284,89 @@ const EcoFacturPage = () => {
         try {
             // Comparar original con modificados y construir array de cambios
             const changes: Array<{ module: string; submodule?: string; enabled: boolean }> = [];
+            const disabledModules = new Set<string>(); // Tracking módulos desactivados para cascada
 
-            const findChanges = (original: any, modified: any, parentKey: string = '') => {
-                for (const key in modified) {
-                    if (['enabled', 'descripcion'].includes(key)) continue;
+            // PRIMERO: Detectar cambios en módulos de nivel superior
+            for (const moduleKey in localModules) {
+                if (['enabled', 'descripcion'].includes(moduleKey)) continue;
 
-                    const originalValue = original?.[key];
-                    const modifiedValue = modified[key];
-                    const isModule = parentKey === ''; // Nivel superior = módulos
+                const originalValue = modulesData?.[moduleKey];
+                const modifiedValue = localModules[moduleKey];
 
-                    if (Array.isArray(modifiedValue)) {
-                        // Si es un array de strings (submódulos)
-                        // Los arrays de strings siempre están habilitados completos
-                        // Solo generamos cambios si el array ha sido convertido a objeto
-                    } else if (typeof modifiedValue === 'object' && modifiedValue !== null) {
-                        // Si es un objeto
-                        if ('enabled' in modifiedValue) {
-                            // Si tiene 'enabled', comparar ese valor
-                            if (originalValue?.enabled !== modifiedValue.enabled) {
-                                if (isModule) {
-                                    changes.push({
-                                        module: key,
-                                        enabled: modifiedValue.enabled
-                                    });
-                                } else {
-                                    changes.push({
-                                        module: parentKey,
-                                        submodule: key,
-                                        enabled: modifiedValue.enabled
-                                    });
-                                }
-                            }
-                        } else {
-                            // Es un objeto con submódulos, recurrir
-                            findChanges(originalValue, modifiedValue, isModule ? key : parentKey);
+                // Si el módulo cambió de estado (boolean → boolean)
+                if (typeof modifiedValue === 'boolean' && typeof originalValue === 'boolean') {
+                    if (originalValue !== modifiedValue) {
+                        changes.push({
+                            module: moduleKey,
+                            enabled: modifiedValue
+                        });
+                        // Si fue DESACTIVADO, marcar para evitar cambios en submódulos
+                        if (modifiedValue === false) {
+                            disabledModules.add(moduleKey);
                         }
-                    } else if (typeof modifiedValue === 'boolean') {
-                        // Si es un boolean directo
-                        if (originalValue !== modifiedValue) {
-                            if (isModule) {
+                    }
+                }
+                // Si es un objeto con 'enabled'
+                else if (typeof modifiedValue === 'object' && modifiedValue !== null && !Array.isArray(modifiedValue)) {
+                    if ('enabled' in modifiedValue && typeof modifiedValue.enabled === 'boolean') {
+                        const originalEnabled = (originalValue as any)?.enabled === true;
+                        if (originalEnabled !== modifiedValue.enabled) {
+                            changes.push({
+                                module: moduleKey,
+                                enabled: modifiedValue.enabled
+                            });
+                            // Si fue DESACTIVADO, marcar para evitar cambios en submódulos
+                            if (modifiedValue.enabled === false) {
+                                disabledModules.add(moduleKey);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // SEGUNDO: Detectar cambios en submódulos (pero NO si el módulo padre fue desactivado)
+            for (const moduleKey in localModules) {
+                if (['enabled', 'descripcion'].includes(moduleKey)) continue;
+
+                // SALTAR: Si este módulo fue desactivado, la cascada del servidor maneja sus submódulos
+                if (disabledModules.has(moduleKey)) {
+                    continue;
+                }
+
+                const originalValue = modulesData?.[moduleKey];
+                const modifiedValue = localModules[moduleKey];
+
+                // Detectar cambios en submódulos dentro del objeto
+                if (typeof modifiedValue === 'object' && modifiedValue !== null && !Array.isArray(modifiedValue)) {
+                    for (const subKey in modifiedValue) {
+                        if (['enabled', 'descripcion'].includes(subKey)) continue;
+
+                        const subModifiedValue = (modifiedValue as Record<string, any>)[subKey];
+
+                        if (Array.isArray(originalValue)) {
+                            // Comparar array original con objeto modificado
+                            const subOriginalValue = (originalValue as string[]).includes(subKey);
+                            if (typeof subModifiedValue === 'boolean' && subOriginalValue !== subModifiedValue) {
                                 changes.push({
-                                    module: key,
-                                    enabled: modifiedValue
+                                    module: moduleKey,
+                                    submodule: subKey,
+                                    enabled: subModifiedValue
                                 });
-                            } else {
+                            }
+                        } else if (typeof originalValue === 'object' && originalValue !== null && !Array.isArray(originalValue)) {
+                            // Comparar objeto original con objeto modificado
+                            const subOriginalValue = (originalValue as Record<string, any>)?.[subKey];
+                            if (typeof subModifiedValue === 'boolean' && subOriginalValue !== subModifiedValue) {
                                 changes.push({
-                                    module: parentKey,
-                                    submodule: key,
-                                    enabled: modifiedValue
+                                    module: moduleKey,
+                                    submodule: subKey,
+                                    enabled: subModifiedValue
                                 });
                             }
                         }
                     }
                 }
-            };
-
-            findChanges(modulesData, localModules);
+            }
 
             // Si no hay cambios, cerrar modal
             if (changes.length === 0) {
@@ -391,12 +418,13 @@ const EcoFacturPage = () => {
     };
 
     // Toggle Switch Component
-    const ToggleSwitch = ({ enabled, onChange, label: _label }: { enabled: boolean; onChange: () => void; label: string }) => (
+    const ToggleSwitch = ({ enabled, onChange, label: _label, disabled = false }: { enabled: boolean; onChange: () => void; label: string; disabled?: boolean }) => (
         <div className="flex items-center gap-3">
             <button
                 type="button"
                 onClick={onChange}
-                className={`relative w-14 h-7 rounded-full transition-all duration-300 ${enabled
+                disabled={disabled}
+                className={`relative w-14 h-7 rounded-full transition-all duration-300 ${disabled ? 'opacity-50 cursor-not-allowed' : ''} ${enabled
                     ? 'bg-gradient-to-r from-[#00FFB0] to-[#00CC8E] shadow-[0_0_20px_rgba(0,255,176,0.4)]'
                     : 'bg-white/10'
                     }`}
@@ -696,6 +724,17 @@ const EcoFacturPage = () => {
                             </button>
                         </div>
 
+                        {/* Info Banner */}
+                        <div className="px-6 pt-4 pb-2">
+                            <div className="p-3 rounded-lg bg-blue-500/10 border border-blue-500/30 text-blue-300 text-xs">
+                                <p className="font-semibold mb-1">💡 Comportamiento:</p>
+                                <ul className="space-y-1 ml-2">
+                                    <li>• Desactivar un <strong>módulo completo</strong> desactiva TODOS sus submódulos</li>
+                                    <li>• Desactivar un <strong>submódulo específico</strong> NO afecta otros submódulos</li>
+                                </ul>
+                            </div>
+                        </div>
+
                         {/* Modal Content */}
                         <div className="flex-1 overflow-y-auto p-6">
                             {modulesLoading ? (
@@ -761,7 +800,14 @@ const EcoFacturPage = () => {
                                                 {/* Submódulos */}
                                                 {submodules.length > 0 && (
                                                     <div className="border-t border-white/5 bg-black/20 p-4 space-y-3">
-                                                        <p className="text-xs font-bold uppercase tracking-widest text-gray-500 mb-3">Submódulos</p>
+                                                        <div className="flex items-center justify-between mb-3">
+                                                            <p className="text-xs font-bold uppercase tracking-widest text-gray-500">Submódulos</p>
+                                                            {!moduleEnabled && (
+                                                                <span className="text-xs px-2 py-1 rounded bg-orange-500/20 border border-orange-500/30 text-orange-300">
+                                                                    Deshabilitados por módulo
+                                                                </span>
+                                                            )}
+                                                        </div>
                                                         {submodules.map(([subName, _subData]) => {
                                                             // Inicializar el estado del submódulo si no existe
                                                             const subPath = `${moduleName}.${subName}`;
@@ -781,16 +827,37 @@ const EcoFacturPage = () => {
                                                                 }
                                                             }
                                                             
+                                                            // Si el módulo principal está deshabilitado, el submódulo también debe estarlo
+                                                            const isDisabledByCascade = !moduleEnabled;
+                                                            const effectivelyEnabled = !isDisabledByCascade && subEnabled;
+                                                            
                                                             return (
-                                                                <div key={subPath} className="flex items-center justify-between pl-4">
+                                                                <div 
+                                                                    key={subPath} 
+                                                                    className={`flex items-center justify-between pl-4 py-2 rounded transition-all ${
+                                                                        isDisabledByCascade 
+                                                                            ? 'opacity-50 cursor-not-allowed' 
+                                                                            : ''
+                                                                    }`}
+                                                                >
                                                                     <div className="flex items-center gap-2">
-                                                                        <div className="w-2 h-2 rounded-full bg-[#00FFB0]/30"></div>
-                                                                        <h5 className="text-sm font-medium capitalize">{subName.replace(/_/g, ' ')}</h5>
+                                                                        <div className={`w-2 h-2 rounded-full ${
+                                                                            isDisabledByCascade 
+                                                                                ? 'bg-gray-500/50' 
+                                                                                : 'bg-[#00FFB0]/30'
+                                                                        }`}></div>
+                                                                        <h5 className="text-sm font-medium capitalize">
+                                                                            {subName.replace(/_/g, ' ')}
+                                                                        </h5>
+                                                                        {isDisabledByCascade && (
+                                                                            <span className="text-xs text-gray-500 ml-auto">(deshabilitado)</span>
+                                                                        )}
                                                                     </div>
                                                                     <ToggleSwitch
-                                                                        enabled={subEnabled}
+                                                                        enabled={effectivelyEnabled}
                                                                         onChange={() => handleToggleModule(subPath)}
                                                                         label={subName}
+                                                                        disabled={isDisabledByCascade}
                                                                     />
                                                                 </div>
                                                             );

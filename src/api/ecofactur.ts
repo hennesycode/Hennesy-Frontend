@@ -126,6 +126,11 @@ export async function getModules(url: string, timeoutMs: number = 10000): Promis
 /**
  * Activa o desactiva un módulo o submódulo
  * POST /configuracion/api/toggle-module/
+ * 
+ * IMPORTANTE:
+ * - Si desactivas un MÓDULO: Se desactivan TODOS sus submódulos automáticamente
+ * - Si desactivas un SUBMÓDULO: Solo ese submódulo se desactiva
+ * - Requiere header X-API-Key
  */
 export async function toggleModule(
   url: string,
@@ -142,7 +147,6 @@ export async function toggleModule(
       headers: {
         'Content-Type': 'application/json',
         'Accept': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
         'X-API-Key': apiKey,
       },
       body: JSON.stringify(request),
@@ -151,24 +155,37 @@ export async function toggleModule(
 
     clearTimeout(timeoutId);
 
-    if (!response.ok) {
-      const contentType = response.headers.get('content-type');
-      let errorMsg = `Error ${response.status}: ${response.statusText}`;
+    // Intentar parsear respuesta como JSON
+    const contentType = response.headers.get('content-type');
+    const isJson = contentType && contentType.includes('application/json');
+    
+    let errorMsg = `Error ${response.status}: ${response.statusText}`;
+    let errorData: any = null;
 
-      if (contentType && contentType.includes('application/json')) {
-        try {
-          const errorData = await response.json();
-          errorMsg = errorData.message || errorData.error || errorMsg;
-        } catch {
-          // Si no se puede parsear, usar el mensaje por defecto
-        }
+    if (isJson) {
+      try {
+        errorData = await response.json();
+        errorMsg = errorData.message || errorData.error || errorMsg;
+      } catch {
+        // Si no se puede parsear, usar el mensaje por defecto
       }
+    }
 
+    // Verificar estado
+    if (!response.ok) {
+      // Códigos específicos de error
+      if (response.status === 401) {
+        throw new Error('❌ 401: Falta header X-API-Key');
+      } else if (response.status === 403) {
+        throw new Error('❌ 403: API Key inválida o no autorizada');
+      } else if (response.status === 404) {
+        throw new Error('❌ 404: Módulo o submódulo no encontrado');
+      }
       throw new Error(errorMsg);
     }
 
-    const contentType = response.headers.get('content-type');
-    if (!contentType || !contentType.includes('application/json')) {
+    // Validar que fue JSON
+    if (!isJson) {
       throw new Error('El servidor no retornó JSON válido');
     }
 
