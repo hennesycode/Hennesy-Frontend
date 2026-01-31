@@ -4,6 +4,38 @@ Historial de cambios y versiones del frontend.
 
 ---
 
+## [2.4.0] - 2026-01-30
+
+### 🔄 Soporte para Nuevo Formato de API
+
+**Actualización para API v2.4.0**
+
+- ✅ **Tipos TypeScript:** Actualizado `ModuleValue` para soportar formato `{ enabled: boolean, submodulos: {...} }`
+- ✅ **Parse de respuesta:** Manejo de 3 formatos:
+  - Booleano simple: `dashboard: true`
+  - Array legacy: `servicios: ["sub1", "sub2"]`
+  - Objeto v2.4.0: `servicios: { enabled: true, submodulos: { sub1: true } }`
+- ✅ **Toggle logic:** Actualizada función `handleToggleModule()` para manejar submódulos anidados
+- ✅ **Change detection:** Mejorada lógica de `handleSaveModules()` para detectar cambios en formato v2.4.0
+- ✅ **UI Rendering:** Actualizado renderizado de submódulos para extraer de `submodulos` object
+- ✅ **Backward compatible:** Mantiene soporte para formatos legacy
+
+### 🔧 Detalles Técnicos
+
+**Archivos Modificados:**
+- `src/pages/EcoFacturPage.tsx`
+  - Líneas 14-22: Tipos TypeScript actualizados con `submodulos` field
+  - Líneas 223-285: `handleToggleModule()` con soporte v2.4.0
+  - Líneas 343-397: `handleSaveModules()` con detección de cambios en `submodulos`
+  - Líneas 765-780: Renderizado de submódulos desde `submodulos` object
+  - Líneas 854-876: Estado de submódulos desde estructura anidada
+- `docs/ECOFACTUR.md`: Documentación actualizada con ejemplos v2.4.0
+
+**Build Status:** ✅ Pendiente  
+**Commit:** Pendiente
+
+---
+
 ## [2.1.0] - 2026-01-30
 
 ### 🎯 Cambios

@@ -1,6 +1,6 @@
 # 🔌 EcoFactur API Integration
 
-**Versión:** 2.1.0 (Última)  
+**Versión:** 2.4.0 (Última)  
 **Fecha:** 30 de enero de 2026  
 **Estado:** ✅ Optimizado y Funcionando
 
@@ -8,7 +8,35 @@
 
 ## 📋 Resumen
 
-Documentación completa de la integración con la API de EcoFactur, incluyendo endpoints, autenticación, cascada de módulos y optimizaciones.
+Documentación completa de la integración con la API de EcoFactur, incluyendo endpoints, autenticación, cascada de módulos y optimizaciones. **Actualizado para soportar el nuevo formato v2.4.0 de respuesta con estados individuales de submódulos.**
+
+---
+
+## 🆕 CAMBIOS EN v2.4.0
+
+**Nuevo formato de respuesta con estados individuales:**
+
+La API ahora retorna objetos con `enabled` y `submodulos` en lugar de arrays de strings:
+
+```json
+{
+  "servicios": {
+    "enabled": true,
+    "submodulos": {
+      "facturar_reciclador": true,
+      "facturar_empresa": true,
+      "camionera": false,
+      "app_pesado": true
+    }
+  },
+  "dashboard": true
+}
+```
+
+**Ventajas:**
+- ✅ Estados individuales por submódulo
+- ✅ Si el módulo padre es `false`, todos los submódulos son `false`
+- ✅ Permite control granular de cada submódulo
 
 ---
 
@@ -43,15 +71,42 @@ GET /configuracion/api/modulos/
 - `Content-Type: application/json`
 - `Accept: application/json`
 
-**Respuesta (200):**
+**Respuesta (200) - Formato v2.4.0:**
 ```json
 {
   "dashboard": true,
   "usuarios": true,
-  "servicios": ["facturar_reciclador", "facturar_empresa", "camionera", "app_pesado"],
-  "facturas": ["recicladores", "empresas"],
-  "estadísticas": ["cajas", "recicladores"],
-  "asociación": ["tarifario", "configurar_tarifas", "app_huellas"],
+  "servicios": {
+    "enabled": true,
+    "submodulos": {
+      "facturar_reciclador": true,
+      "facturar_empresa": true,
+      "camionera": false,
+      "app_pesado": true
+    }
+  },
+  "facturas": {
+    "enabled": true,
+    "submodulos": {
+      "recicladores": true,
+      "empresas": true
+    }
+  },
+  "estadísticas": {
+    "enabled": true,
+    "submodulos": {
+      "cajas": true,
+      "recicladores": false
+    }
+  },
+  "asociación": {
+    "enabled": true,
+    "submodulos": {
+      "tarifario": true,
+      "configurar_tarifas": true,
+      "app_huellas": false
+    }
+  },
   "empresas": true,
   "inventario": true,
   "configuración": true,

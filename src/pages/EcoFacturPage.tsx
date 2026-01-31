@@ -13,11 +13,15 @@ interface Company {
     updated_at: string;
 }
 
-// Estructura de módulos según API de EcoFactur
-type ModuleValue = boolean | string[] | {
-    enabled?: boolean;
-    [key: string]: any;
-};
+// Estructura de módulos según API de EcoFactur v2.4.0
+type ModuleValue = 
+    | boolean  // Módulos simples: dashboard: true
+    | string[] // Formato legacy: ["sub1", "sub2"]
+    | {        // Formato v2.4.0: { enabled: true, submodulos: {...} }
+        enabled?: boolean;
+        submodulos?: Record<string, boolean>;
+        [key: string]: any;
+      };
 
 type ModulosData = Record<string, ModuleValue>;
 
@@ -237,34 +241,45 @@ const EcoFacturPage = () => {
                 const currentValue = newModules[moduleName];
                 
                 if (typeof currentValue === 'boolean') {
+                    // Formato simple: dashboard: true
                     newModules[moduleName] = !currentValue;
                 } else if (Array.isArray(currentValue)) {
                     // Si es un array de strings, no cambiamos nada (siempre habilitado)
                     return prev;
                 } else if (typeof currentValue === 'object' && 'enabled' in currentValue) {
+                    // Formato v2.4.0: { enabled: true, submodulos: {...} }
                     newModules[moduleName].enabled = !currentValue.enabled;
                 }
             } else if (keys.length === 2) {
                 // Es un submódulo
                 const [moduleName, subName] = keys;
+                const moduleValue = newModules[moduleName];
                 
-                if (Array.isArray(newModules[moduleName])) {
-                    // Si el módulo es un array de strings, crear objeto para este submódulo
-                    const index = (newModules[moduleName] as string[]).indexOf(subName);
+                if (Array.isArray(moduleValue)) {
+                    // Formato legacy: ["sub1", "sub2"]
+                    const index = (moduleValue as string[]).indexOf(subName);
                     if (index !== -1) {
-                        // Convertir array a objeto con estados booleanos
-                        const arrayToObject: Record<string, boolean> = {};
-                        (newModules[moduleName] as string[]).forEach(sub => {
-                            arrayToObject[sub] = sub !== subName ? true : false;
+                        // Convertir a formato v2.4.0
+                        const submodulos: Record<string, boolean> = {};
+                        (moduleValue as string[]).forEach(sub => {
+                            submodulos[sub] = sub !== subName;
                         });
-                        newModules[moduleName] = arrayToObject;
+                        newModules[moduleName] = { enabled: true, submodulos };
                     }
-                } else if (typeof newModules[moduleName] === 'object') {
-                    const subModule = newModules[moduleName][subName];
-                    if (typeof subModule === 'boolean') {
-                        newModules[moduleName][subName] = !subModule;
-                    } else if (typeof subModule === 'object' && 'enabled' in subModule) {
-                        newModules[moduleName][subName].enabled = !subModule.enabled;
+                } else if (typeof moduleValue === 'object') {
+                    // Formato v2.4.0: { enabled: true, submodulos: { sub1: true } }
+                    if ('submodulos' in moduleValue && typeof moduleValue.submodulos === 'object') {
+                        // Formato v2.4.0 correcto
+                        const subModule = moduleValue.submodulos![subName];
+                        if (typeof subModule === 'boolean') {
+                            newModules[moduleName].submodulos[subName] = !subModule;
+                        }
+                    } else {
+                        // Formato alternativo: { enabled: true, sub1: true }
+                        const subModule = moduleValue[subName];
+                        if (typeof subModule === 'boolean') {
+                            newModules[moduleName][subName] = !subModule;
+                        }
                     }
                 }
             }
@@ -338,14 +353,15 @@ const EcoFacturPage = () => {
 
                 // Detectar cambios en submódulos dentro del objeto
                 if (typeof modifiedValue === 'object' && modifiedValue !== null && !Array.isArray(modifiedValue)) {
-                    for (const subKey in modifiedValue) {
-                        if (['enabled', 'descripcion'].includes(subKey)) continue;
-
-                        const subModifiedValue = (modifiedValue as Record<string, any>)[subKey];
-
-                        if (Array.isArray(originalValue)) {
-                            // Comparar array original con objeto modificado
-                            const subOriginalValue = (originalValue as string[]).includes(subKey);
+                    // Formato v2.4.0: { enabled: true, submodulos: { sub1: true } }
+                    if ('submodulos' in modifiedValue && typeof modifiedValue.submodulos === 'object') {
+                        for (const subKey in modifiedValue.submodulos) {
+                            const subModifiedValue = modifiedValue.submodulos[subKey];
+                            
+                            // Comparar con el original
+                            const originalSubmodulos = (originalValue as any)?.submodulos;
+                            const subOriginalValue = originalSubmodulos?.[subKey];
+                            
                             if (typeof subModifiedValue === 'boolean' && subOriginalValue !== subModifiedValue) {
                                 changes.push({
                                     module: moduleKey,
@@ -353,15 +369,34 @@ const EcoFacturPage = () => {
                                     enabled: subModifiedValue
                                 });
                             }
-                        } else if (typeof originalValue === 'object' && originalValue !== null && !Array.isArray(originalValue)) {
-                            // Comparar objeto original con objeto modificado
-                            const subOriginalValue = (originalValue as Record<string, any>)?.[subKey];
-                            if (typeof subModifiedValue === 'boolean' && subOriginalValue !== subModifiedValue) {
-                                changes.push({
-                                    module: moduleKey,
-                                    submodule: subKey,
-                                    enabled: subModifiedValue
-                                });
+                        }
+                    } else {
+                        // Formato alternativo: { enabled: true, sub1: true, sub2: false }
+                        for (const subKey in modifiedValue) {
+                            if (['enabled', 'descripcion', 'submodulos'].includes(subKey)) continue;
+
+                            const subModifiedValue = (modifiedValue as Record<string, any>)[subKey];
+
+                            if (Array.isArray(originalValue)) {
+                                // Comparar array original con objeto modificado
+                                const subOriginalValue = (originalValue as string[]).includes(subKey);
+                                if (typeof subModifiedValue === 'boolean' && subOriginalValue !== subModifiedValue) {
+                                    changes.push({
+                                        module: moduleKey,
+                                        submodule: subKey,
+                                        enabled: subModifiedValue
+                                    });
+                                }
+                            } else if (typeof originalValue === 'object' && originalValue !== null && !Array.isArray(originalValue)) {
+                                // Comparar objeto original con objeto modificado
+                                const subOriginalValue = (originalValue as Record<string, any>)?.[subKey];
+                                if (typeof subModifiedValue === 'boolean' && subOriginalValue !== subModifiedValue) {
+                                    changes.push({
+                                        module: moduleKey,
+                                        submodule: subKey,
+                                        enabled: subModifiedValue
+                                    });
+                                }
                             }
                         }
                     }
@@ -761,12 +796,18 @@ const EcoFacturPage = () => {
                                         let submodules: Array<[string, any]> = [];
                                         
                                         if (isArrayOfStrings) {
-                                            // Si es array de strings, usar los strings directamente como submódulos
+                                            // Formato legacy: ["sub1", "sub2"]
                                             submodules = (moduleData as string[]).map(subName => [subName, true]);
                                         } else if (isModuleObject) {
-                                            // Si es un objeto, obtener solo los keys que no sean 'enabled' o 'descripcion'
-                                            submodules = Object.entries(moduleData as Record<string, any>)
-                                                .filter(([key]) => !['enabled', 'descripcion'].includes(key));
+                                            // Formato v2.4.0: { enabled: true, submodulos: { sub1: true } }
+                                            if ('submodulos' in moduleData && typeof (moduleData as any).submodulos === 'object') {
+                                                submodules = Object.entries((moduleData as any).submodulos)
+                                                    .filter(([key]) => !['enabled', 'descripcion'].includes(key));
+                                            } else {
+                                                // Formato alternativo: { enabled: true, sub1: true }
+                                                submodules = Object.entries(moduleData as Record<string, any>)
+                                                    .filter(([key]) => !['enabled', 'descripcion', 'submodulos'].includes(key));
+                                            }
                                         }
                                         
                                         return (
@@ -816,13 +857,25 @@ const EcoFacturPage = () => {
                                                             // Obtener el estado actual del submódulo
                                                             if (localModules[moduleName]) {
                                                                 if (Array.isArray(localModules[moduleName])) {
+                                                                    // Formato legacy: ["sub1", "sub2"]
                                                                     subEnabled = true; // Arrays de strings siempre habilitados
                                                                 } else if (typeof localModules[moduleName] === 'object') {
-                                                                    const subModule = (localModules[moduleName] as any)[subName];
-                                                                    if (typeof subModule === 'boolean') {
-                                                                        subEnabled = subModule;
-                                                                    } else if (typeof subModule === 'object' && subModule?.enabled !== undefined) {
-                                                                        subEnabled = subModule.enabled;
+                                                                    const moduleObj = localModules[moduleName] as any;
+                                                                    
+                                                                    // Formato v2.4.0: { enabled: true, submodulos: { sub1: true } }
+                                                                    if ('submodulos' in moduleObj && typeof moduleObj.submodulos === 'object') {
+                                                                        const subModule = moduleObj.submodulos[subName];
+                                                                        if (typeof subModule === 'boolean') {
+                                                                            subEnabled = subModule;
+                                                                        }
+                                                                    } else {
+                                                                        // Formato alternativo: { enabled: true, sub1: true }
+                                                                        const subModule = moduleObj[subName];
+                                                                        if (typeof subModule === 'boolean') {
+                                                                            subEnabled = subModule;
+                                                                        } else if (typeof subModule === 'object' && subModule?.enabled !== undefined) {
+                                                                            subEnabled = subModule.enabled;
+                                                                        }
                                                                     }
                                                                 }
                                                             }
