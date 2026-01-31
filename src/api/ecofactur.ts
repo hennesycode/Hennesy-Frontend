@@ -75,11 +75,13 @@ export async function checkHealthStatus(url: string, timeoutMs: number = 5000): 
  * GET /configuracion/api/modulos/
  */
 export async function getModules(url: string, timeoutMs: number = 10000): Promise<ModulesResponse | null> {
+  let response: Response | null = null;
+  
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
-    const response = await fetch(`${url}/configuracion/api/modulos/`, {
+    response = await fetch(`${url}/configuracion/api/modulos/`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
@@ -90,45 +92,53 @@ export async function getModules(url: string, timeoutMs: number = 10000): Promis
 
     clearTimeout(timeoutId);
 
-    const contentType = response.headers.get('content-type');
-    const isJson = contentType && contentType.includes('application/json');
+    // Verificar tipo de contenido ANTES de leer
+    const contentType = response.headers.get('content-type') || '';
+    const isJson = contentType.includes('application/json');
+
+    if (!isJson) {
+      const text = await response.text();
+      console.error('❌ Respuesta no JSON:', text.substring(0, 200));
+      throw new Error('El servidor retornó HTML en lugar de JSON');
+    }
 
     // LEER EL BODY UNA SOLA VEZ
-    let data: ModulesResponse;
-    
+    let data: any;
     try {
       data = await response.json();
     } catch (parseError) {
-      console.error('❌ Error al parsear JSON:', parseError);
-      throw new Error('El servidor retornó una respuesta inválida');
+      console.error('❌ Error al parsear JSON en getModules:', parseError);
+      throw new Error('Error al procesar módulos');
     }
 
     if (!response.ok) {
-      const errorMsg = response.status === 401 || response.status === 403
+      const errorMsg = data?.message || `Error ${response.status}`;
+      const statusMsg = response.status === 401 || response.status === 403
         ? 'API Key inválida o sin permisos'
-        : `Error ${response.status}: ${response.statusText}`;
-      throw new Error(errorMsg);
-    }
-
-    if (!isJson) {
-      console.error('❌ Respuesta no es JSON válido');
-      throw new Error('El servidor retornó HTML en lugar de JSON. Verifique que la API esté funcionando correctamente.');
+        : errorMsg;
+      throw new Error(statusMsg);
     }
 
     if (!data || typeof data !== 'object') {
-      throw new Error('Respuesta inválida: se esperaba un objeto con los módulos');
+      throw new Error('Respuesta inválida: se esperaba un objeto');
     }
 
-    return data;
+    return data as ModulesResponse;
+    
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') {
       console.error('⏱️ Timeout al obtener módulos');
       throw new Error('⏱️ Timeout: El servidor no respondió a tiempo');
     } else if (error instanceof Error && error.message.includes('Failed to fetch')) {
-      console.error('🌐 Error de red');
-      throw new Error('🌐 Error de red: No se puede conectar al servidor');
+      console.error('🌐 Error de red en getModules');
+      throw new Error('🌐 Error de red');
+    } else if (error instanceof Error && error.message.includes('stream already read')) {
+      console.error('🔄 Error de stream ya consumido en getModules');
+      throw new Error('Error: stream ya consumido. Intenta de nuevo.');
     }
     throw error;
+  } finally {
+    response = null;
   }
 }
 
@@ -147,11 +157,13 @@ export async function toggleModule(
   request: ToggleModuleRequest,
   timeoutMs: number = 15000
 ): Promise<ToggleModuleResponse> {
+  let response: Response | null = null;
+  
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
-    const response = await fetch(`${url}/configuracion/api/toggle-module/`, {
+    response = await fetch(`${url}/configuracion/api/toggle-module/`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -164,48 +176,73 @@ export async function toggleModule(
 
     clearTimeout(timeoutId);
 
-    // Verificar tipo de contenido
-    const contentType = response.headers.get('content-type');
-    const isJson = contentType && contentType.includes('application/json');
+    // Verificar tipo de contenido ANTES de leer
+    const contentType = response.headers.get('content-type') || '';
+    const isJson = contentType.includes('application/json');
     
-    // Validar que la respuesta es JSON
     if (!isJson) {
+      const text = await response.text();
+      console.error('❌ Respuesta no JSON:', text.substring(0, 200));
       throw new Error('El servidor no retornó JSON válido');
     }
 
-    // Leer el body UNA SOLA VEZ
-    const result: ToggleModuleResponse = await response.json();
+    // LEER EL BODY UNA SOLA VEZ - usar clone si es necesario
+    let result: any;
+    try {
+      result = await response.json();
+    } catch (parseError) {
+      console.error('❌ Error al parsear JSON:', parseError);
+      throw new Error('Error al procesar respuesta del servidor');
+    }
 
-    // Verificar estado después de parsear
+    // Validar que result es un objeto válido
+    if (!result || typeof result !== 'object') {
+      throw new Error('Respuesta inválida del servidor');
+    }
+
+    // Verificar estado HTTP después de parsear
     if (!response.ok) {
-      const errorMsg = result.message || result.error || `Error ${response.status}: ${response.statusText}`;
+      const errorMsg = result.message || result.error || `Error ${response.status}`;
       
-      // Códigos específicos de error
       if (response.status === 401) {
-        throw new Error('❌ 401: Falta header X-API-Key');
+        throw new Error('❌ 401: Falta o inválida la API Key');
       } else if (response.status === 403) {
-        throw new Error('❌ 403: API Key inválida o no autorizada');
+        throw new Error('❌ 403: No autorizado');
       } else if (response.status === 404) {
-        throw new Error('❌ 404: Módulo o submódulo no encontrado');
+        throw new Error('❌ 404: Recurso no encontrado');
+      } else if (response.status >= 500) {
+        throw new Error(`❌ Error del servidor (${response.status}): ${errorMsg}`);
       }
       throw new Error(errorMsg);
     }
 
-    // Verificar success en la respuesta
-    if (result.success === false) {
+    // Verificar que el servidor reporta éxito
+    if (result.success !== true) {
       throw new Error(result.message || 'Error al actualizar el módulo');
     }
 
-    return result;
+    // Validar estructura mínima esperada
+    if (!result.module) {
+      throw new Error('Respuesta inválida: falta campo "module"');
+    }
+
+    return result as ToggleModuleResponse;
+    
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') {
       console.error('⏱️ Timeout al cambiar módulo');
-      throw new Error('⏱️ Timeout: El servidor tardó demasiado en responder');
+      throw new Error('⏱️ Timeout: El servidor tardó demasiado');
     } else if (error instanceof Error && error.message.includes('Failed to fetch')) {
       console.error('🌐 Error de red');
-      throw new Error('🌐 Error de red: No se pudo conectar al servidor');
+      throw new Error('🌐 Error de red');
+    } else if (error instanceof Error && error.message.includes('stream already read')) {
+      console.error('🔄 Error de stream ya consumido');
+      throw new Error('Error interno: stream ya consumido. Intenta de nuevo.');
     }
     throw error;
+  } finally {
+    // Limpiar referencia para permitir garbage collection
+    response = null;
   }
 }
 

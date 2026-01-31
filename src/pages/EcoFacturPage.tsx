@@ -415,8 +415,8 @@ const EcoFacturPage = () => {
 
             console.log('📤 Enviando cambios a EcoFactur:', changes);
 
-            // Aplicar cambios en paralelo
-            const results = await Promise.all(
+            // Aplicar cambios en paralelo CON MANEJO DE ERRORES
+            const results = await Promise.allSettled(
                 changes.map(change =>
                     ecofacturService.toggleModule(
                         modulesCompany.url,
@@ -427,13 +427,22 @@ const EcoFacturPage = () => {
             );
 
             // Verificar si todos fueron exitosos
-            const allSuccess = results.every(r => r.success === true);
+            const failures = results.filter(r => r.status === 'rejected');
+            if (failures.length > 0) {
+                const errorMsg = failures.map((f: any) => f.reason?.message || 'Error desconocido').join('; ');
+                throw new Error(`Algunos cambios no se aplicaron: ${errorMsg}`);
+            }
+
+            const allSuccess = results.every(r => r.status === 'fulfilled' && (r.value as any).success === true);
             if (!allSuccess) {
                 throw new Error('Algunos cambios no se aplicaron correctamente');
             }
 
             console.log('✅ Cambios aplicados exitosamente');
             setSaveSuccess(true);
+
+            // Pequeña pausa para que el servidor procese todo
+            await new Promise(resolve => setTimeout(resolve, 500));
 
             // Recargar módulos para obtener estado actualizado
             const updatedModules = await ecofacturService.getModules(modulesCompany.url);
